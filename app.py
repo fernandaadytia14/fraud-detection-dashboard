@@ -39,7 +39,17 @@ st.markdown("""
 # Load data
 @st.cache_data
 def load_data():
-    df = pd.read_csv('creditcard.csv')
+    import gdown
+    import os
+    
+    output = "creditcard.csv"
+    
+    # Cek apakah file sudah ada di lokal
+    if not os.path.exists(output):
+        file_id = "17rJlezUB3oaA8swlWmeOG824P8VSt_JD"
+        gdown.download(id=file_id, output=output, quiet=False)
+    
+    df = pd.read_csv(output)
     df['Hour'] = (df['Time'] / 3600).astype(int) % 24
     return df
 
