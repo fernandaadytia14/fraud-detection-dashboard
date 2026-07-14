@@ -2,28 +2,32 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
+import time
+import random
+import string
 import warnings
+from datetime import datetime, timedelta
 
 warnings.filterwarnings('ignore')
 
-# Konfigurasi halaman
+# ============================================================
+# KONFIGURASI HALAMAN
+# ============================================================
 st.set_page_config(
-    page_title="Credit Card Fraud Detection Dashboard",
-    page_icon="🔍",
+    page_title="Credit Card Fraud Detection - Live Dashboard",
+    page_icon="🔴",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
-# Custom CSS
 st.markdown("""
     <style>
     .main { background-color: #0e1117; }
-    .block-container { padding-top: 2rem; }
-    h1 { color: #ffffff; font-size: 2.2rem; font-weight: 700; }
-    h2 { color: #ffffff; font-size: 1.5rem; font-weight: 600; }
+    .block-container { padding-top: 1rem; }
+    h1 { color: #ffffff; font-size: 2rem; font-weight: 700; }
+    h2 { color: #ffffff; font-size: 1.4rem; font-weight: 600; }
     h3 { color: #ffffff; }
+    section[data-testid="stSidebar"] { display: none; }
     .stMetric {
         background-color: #1e2130;
         border-radius: 12px;
@@ -32,309 +36,318 @@ st.markdown("""
     }
     .stMetric label { color: #a0aec0 !important; font-size: 0.85rem; }
     .stMetric div { color: #ffffff !important; font-size: 1.8rem; font-weight: 700; }
-    .css-1d391kg { background-color: #1e2130; }
     </style>
 """, unsafe_allow_html=True)
 
-# Load data
+# ============================================================
+# INISIALISASI SESSION STATE
+# ============================================================
+if 'transaction_count' not in st.session_state:
+    st.session_state.transaction_count = 0
+if 'fraud_count' not in st.session_state:
+    st.session_state.fraud_count = 0
+if 'transaction_log' not in st.session_state:
+    st.session_state.transaction_log = []
+if 'last_timestamp' not in st.session_state:
+    st.session_state.last_timestamp = datetime.now()
+if 'last_index' not in st.session_state:
+    st.session_state.last_index = 0
+
+# ============================================================
+# LOAD DATA
+# ============================================================
 @st.cache_data
 def load_data():
     import gdown
     import os
-    
     output = "creditcard.csv"
-    
-    # Cek apakah file sudah ada di lokal
     if not os.path.exists(output):
         file_id = "17rJlezUB3oaA8swlWmeOG824P8VSt_JD"
         gdown.download(id=file_id, output=output, quiet=False)
-    
     df = pd.read_csv(output)
     df['Hour'] = (df['Time'] / 3600).astype(int) % 24
     return df
 
 df = load_data()
+df_simulation = df.sample(frac=1, random_state=42).reset_index(drop=True)
 
 # ============================================================
-# SIDEBAR
+# FUNGSI GENERATE DATA REALISTIS
 # ============================================================
-st.sidebar.image("https://img.icons8.com/fluency/96/fraud.png", width=60)
-st.sidebar.title("Filter Data")
-st.sidebar.markdown("---")
-
-class_filter = st.sidebar.selectbox(
-    "Jenis Transaksi",
-    options=["All", "Normal (0)", "Fraud (1)"]
-)
-
-hour_filter = st.sidebar.slider(
-    "Rentang Jam Transaksi",
-    min_value=0,
-    max_value=23,
-    value=(0, 23)
-)
-
-amount_filter = st.sidebar.slider(
-    "Rentang Nilai Transaksi (€)",
-    min_value=float(df['Amount'].min()),
-    max_value=float(df['Amount'].max()),
-    value=(float(df['Amount'].min()), float(df['Amount'].max()))
-)
-
-# Apply filter
-df_filtered = df.copy()
-if class_filter == "Normal (0)":
-    df_filtered = df_filtered[df_filtered['Class'] == 0]
-elif class_filter == "Fraud (1)":
-    df_filtered = df_filtered[df_filtered['Class'] == 1]
-
-df_filtered = df_filtered[
-    (df_filtered['Hour'] >= hour_filter[0]) &
-    (df_filtered['Hour'] <= hour_filter[1]) &
-    (df_filtered['Amount'] >= amount_filter[0]) &
-    (df_filtered['Amount'] <= amount_filter[1])
-]
-
-st.sidebar.markdown("---")
-st.sidebar.markdown("**Total data:** " + f"{len(df_filtered):,}")
-st.sidebar.markdown("**Fraud:** " + f"{df_filtered['Class'].sum():,}")
+def generate_realistic_data(row, index):
+    card_prefix = random.choice(['4532', '4916', '5412', '5234', '3782'])
+    card_suffix = str(random.randint(1000, 9999))
+    card_number = f"{card_prefix} **** **** {card_suffix}"
+    rrn = ''.join(random.choices(string.digits, k=12))
+    account = f"ACC{str(index).zfill(8)}"
+    merchants_normal = ['Walmart', 'Amazon', 'Target', 'Starbucks',
+                        'McDonald', 'Netflix', 'Grab', 'Indomaret']
+    merchants_fraud = ['Unknown Merchant', 'XXXONLINE', 'FastCash99',
+                       'QuickPay', 'AnonShop', 'DarkStore']
+    merchant = random.choice(merchants_fraud) if row['Class'] == 1 else random.choice(merchants_normal)
+    return card_number, rrn, account, merchant
 
 # ============================================================
-# HEADER
+# HEADER + FILTER WAKTU
 # ============================================================
-st.title("Credit Card Fraud Detection Dashboard")
-st.markdown("Exploratory Data Analysis on Credit Card Transaction Data — by **Fernanda Adytia Pratama**")
+header_col1, header_col2 = st.columns([3, 2])
+
+with header_col1:
+    st.title("🔴 Credit Card Fraud Detection — Live Dashboard")
+    st.markdown("Real-time transaction monitoring — by **Fernanda Adytia Pratama**")
+
+with header_col2:
+    st.markdown("<br>", unsafe_allow_html=True)
+    time_options = ["Semua Data", "15 Menit Terakhir", "1 Jam Terakhir", "Today", "2 Hari Terakhir", "Custom"]
+    selected_time = st.selectbox("Filter Rentang Waktu", options=time_options, index=0)
+
+    custom_start = None
+    custom_end = None
+    if selected_time == "Custom":
+        custom_col1, custom_col2 = st.columns(2)
+        with custom_col1:
+            start_date = st.date_input("Dari Tanggal", value=datetime.now().date())
+            start_time_input = st.time_input("Dari Jam", value=datetime.now().replace(hour=0, minute=0).time())
+        with custom_col2:
+            end_date = st.date_input("Sampai Tanggal", value=datetime.now().date())
+            end_time_input = st.time_input("Sampai Jam", value=datetime.now().time())
+        custom_start = datetime.combine(start_date, start_time_input)
+        custom_end = datetime.combine(end_date, end_time_input)
+
 st.markdown("---")
+
+# ============================================================
+# HELPER FILTER WAKTU
+# ============================================================
+def filter_by_time(df_log):
+    if df_log.empty:
+        return df_log
+    df_log = df_log.copy()
+    df_log['Timestamp'] = pd.to_datetime(df_log['Timestamp'])
+    now = datetime.now()
+    if selected_time == "15 Menit Terakhir":
+        cutoff = now - timedelta(minutes=15)
+        df_log = df_log[df_log['Timestamp'] >= cutoff]
+    elif selected_time == "1 Jam Terakhir":
+        cutoff = now - timedelta(hours=1)
+        df_log = df_log[df_log['Timestamp'] >= cutoff]
+    elif selected_time == "Today":
+        cutoff = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        df_log = df_log[df_log['Timestamp'] >= cutoff]
+    elif selected_time == "2 Hari Terakhir":
+        cutoff = now - timedelta(days=2)
+        df_log = df_log[df_log['Timestamp'] >= cutoff]
+    elif selected_time == "Custom" and custom_start and custom_end:
+        df_log = df_log[
+            (df_log['Timestamp'] >= custom_start) &
+            (df_log['Timestamp'] <= custom_end)
+        ]
+    df_log['Timestamp'] = df_log['Timestamp'].dt.strftime("%Y-%m-%d %H:%M:%S")
+    return df_log
+
+def apply_filters(log_list):
+    if not log_list:
+        return pd.DataFrame()
+    df_log = pd.DataFrame(log_list).iloc[::-1]
+    df_log.insert(0, 'No', range(len(log_list), len(log_list) - len(df_log), -1))
+    df_log = df_log.head(500)
+    if search_rrn:
+        df_log['Timestamp'] = df_log['Timestamp'].astype(str)
+        df_log = df_log[df_log['RRN'].str.contains(search_rrn, case=False)]
+    if search_card:
+        df_log = df_log[df_log['Card Number'].str.contains(search_card, case=False)]
+    return df_log
 
 # ============================================================
 # METRIC CARDS
 # ============================================================
 col1, col2, col3, col4 = st.columns(4)
-
-total = len(df_filtered)
-total_fraud = int(df_filtered['Class'].sum())
-fraud_pct = round(df_filtered['Class'].mean() * 100, 4)
-max_fraud_amount = df_filtered[df_filtered['Class']==1]['Amount'].max() if total_fraud > 0 else 0
-
-col1.metric("Total Transaksi", f"{total:,}")
-col2.metric("Total Fraud", f"{total_fraud:,}")
-col3.metric("Persentase Fraud", f"{fraud_pct}%")
-col4.metric("Max Amount Fraud", f"€{max_fraud_amount:,.2f}")
-
+metric1 = col1.empty()
+metric2 = col2.empty()
+metric3 = col3.empty()
+metric4 = col4.empty()
 st.markdown("---")
 
 # ============================================================
-# SECTION 1 - CLASS DISTRIBUTION
+# ALERT
 # ============================================================
-st.subheader("Section 1 — Distribusi Kelas Transaksi")
+alert_placeholder = st.empty()
+st.markdown("---")
 
-col1, col2 = st.columns(2)
+# ============================================================
+# SEARCH + TABEL
+# ============================================================
+search_col1, search_col2 = st.columns(2)
+search_rrn = search_col1.text_input("🔍 Cari berdasarkan RRN")
+search_card = search_col2.text_input("🔍 Cari berdasarkan Card Number")
 
-class_counts = df_filtered['Class'].value_counts().reset_index()
-class_counts.columns = ['Class', 'Count']
-class_counts['Label'] = class_counts['Class'].map({0: 'Normal', 1: 'Fraud'})
+st.subheader("Live Transaction Feed")
+table_placeholder = st.empty()
+st.markdown("---")
 
-with col1:
-    fig = px.bar(
-        class_counts,
-        x='Label',
-        y='Count',
-        color='Label',
-        color_discrete_map={'Normal': '#2ecc71', 'Fraud': '#e74c3c'},
-        title='Jumlah Transaksi Normal vs Fraud',
-        text='Count'
-    )
-    fig.update_traces(texttemplate='%{text:,}', textposition='outside')
-    fig.update_layout(
-        showlegend=False,
-        plot_bgcolor='rgba(0,0,0,0)',
-        paper_bgcolor='rgba(0,0,0,0)',
-        font_color='white',
-        title_font_size=14
-    )
-    st.plotly_chart(fig, use_container_width=True)
+# ============================================================
+# CHART PLACEHOLDER
+# ============================================================
+st.subheader("Analisis Realtime")
+chart_col1, chart_col2 = st.columns(2)
+chart1_placeholder = chart_col1.empty()
+chart2_placeholder = chart_col2.empty()
 
-with col2:
-    fig = px.pie(
+# ============================================================
+# FUNGSI UPDATE CHART
+# ============================================================
+def update_charts(log_list, key_suffix=0):
+    if not log_list:
+        return
+
+    df_existing = apply_filters(log_list)
+    if df_existing.empty:
+        return
+
+    # Chart 1 - Pie chart
+    class_counts = df_existing['Status'].value_counts().reset_index()
+    class_counts.columns = ['Status', 'Count']
+
+    fig1 = px.pie(
         class_counts,
         values='Count',
-        names='Label',
-        color='Label',
-        color_discrete_map={'Normal': '#2ecc71', 'Fraud': '#e74c3c'},
-        title='Proporsi Transaksi Normal vs Fraud',
+        names='Status',
+        color='Status',
+        color_discrete_map={'✅ Normal': '#2ecc71', '🚨 FRAUD': '#e74c3c'},
+        title=f'Distribusi Transaksi — Total: {len(df_existing):,}',
         hole=0.45
     )
-    fig.update_layout(
+    fig1.update_traces(textposition='inside', textinfo='percent+label+value')
+    fig1.update_layout(
         plot_bgcolor='rgba(0,0,0,0)',
         paper_bgcolor='rgba(0,0,0,0)',
         font_color='white',
         title_font_size=14
     )
-    st.plotly_chart(fig, use_container_width=True)
+    chart1_placeholder.plotly_chart(
+        fig1,
+        use_container_width=True,
+        key=f"chart1_{key_suffix}"
+    )
 
-st.markdown("---")
+    # Chart 2 - Bar chart per jam
+    df_existing2 = df_existing.copy()
+    df_existing2['Hour'] = pd.to_datetime(df_existing2['Timestamp']).dt.hour
+    hour_group = df_existing2.groupby(['Hour', 'Status']).size().reset_index(name='Count')
 
-# ============================================================
-# SECTION 2 - ANALISIS WAKTU
-# ============================================================
-st.subheader("Section 2 — Analisis Pola Waktu Transaksi")
-
-col1, col2 = st.columns(2)
-
-normal_hour = df_filtered[df_filtered['Class']==0]['Hour'].value_counts().sort_index().reset_index()
-normal_hour.columns = ['Hour', 'Count']
-
-fraud_hour = df_filtered[df_filtered['Class']==1]['Hour'].value_counts().sort_index().reset_index()
-fraud_hour.columns = ['Hour', 'Count']
-
-with col1:
-    fig = px.line(
-        normal_hour,
+    fig2 = px.bar(
+        hour_group,
         x='Hour',
         y='Count',
-        title='Pola Transaksi Normal per Jam',
-        markers=True,
-        color_discrete_sequence=['#2ecc71']
+        color='Status',
+        color_discrete_map={'✅ Normal': '#2ecc71', '🚨 FRAUD': '#e74c3c'},
+        title='Transaksi per Jam (Realtime)',
+        barmode='group',
+        text='Count'
     )
-    fig.update_layout(
+    fig2.update_traces(textposition='outside')
+    fig2.update_layout(
         plot_bgcolor='rgba(0,0,0,0)',
         paper_bgcolor='rgba(0,0,0,0)',
         font_color='white',
         title_font_size=14,
-        xaxis=dict(dtick=2)
+        xaxis=dict(dtick=1)
     )
-    st.plotly_chart(fig, use_container_width=True)
-
-with col2:
-    fig = px.bar(
-        fraud_hour,
-        x='Hour',
-        y='Count',
-        title='Pola Transaksi Fraud per Jam',
-        color='Count',
-        color_continuous_scale='Reds'
+    chart2_placeholder.plotly_chart(
+        fig2,
+        use_container_width=True,
+        key=f"chart2_{key_suffix}"
     )
-    fig.update_layout(
-        plot_bgcolor='rgba(0,0,0,0)',
-        paper_bgcolor='rgba(0,0,0,0)',
-        font_color='white',
-        title_font_size=14,
-        xaxis=dict(dtick=2)
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-st.markdown("---")
 
 # ============================================================
-# SECTION 3 - ANALISIS AMOUNT
+# TAMPILKAN DATA EXISTING
 # ============================================================
-st.subheader("Section 3 — Analisis Nilai Transaksi (Amount)")
+if st.session_state.transaction_log:
+    tc = st.session_state.transaction_count
+    fc = st.session_state.fraud_count
+    fp = round(fc / tc * 100, 4) if tc > 0 else 0
 
-col1, col2 = st.columns(2)
+    metric1.metric("Total Transaksi", f"{tc:,}")
+    metric2.metric("Total Fraud", f"{fc:,}")
+    metric3.metric("Persentase Fraud", f"{fp}%")
+    metric4.metric("Amount Terakhir",
+        f"€{st.session_state.transaction_log[-1]['Amount (€)']:.2f}")
 
-with col1:
-    fig = px.histogram(
-        df_filtered,
-        x='Amount',
-        color='Class',
-        color_discrete_map={0: '#2ecc71', 1: '#e74c3c'},
-        nbins=100,
-        title='Distribusi Amount: Normal vs Fraud',
-        barmode='overlay',
-        opacity=0.7,
-        labels={'Class': 'Kelas'}
-    )
-    fig.update_layout(
-        plot_bgcolor='rgba(0,0,0,0)',
-        paper_bgcolor='rgba(0,0,0,0)',
-        font_color='white',
-        title_font_size=14
-    )
-    st.plotly_chart(fig, use_container_width=True)
+    df_log = apply_filters(st.session_state.transaction_log)
+    if not df_log.empty:
+        table_placeholder.dataframe(df_log, use_container_width=True)
+    else:
+        table_placeholder.info("Tidak ada data pada rentang waktu yang dipilih.")
 
-with col2:
-    fig = px.box(
-        df_filtered,
-        x='Class',
-        y='Amount',
-        color='Class',
-        color_discrete_map={0: '#2ecc71', 1: '#e74c3c'},
-        title='Boxplot Amount: Normal vs Fraud',
-        labels={'Class': 'Kelas (0=Normal, 1=Fraud)'}
-    )
-    fig.update_layout(
-        plot_bgcolor='rgba(0,0,0,0)',
-        paper_bgcolor='rgba(0,0,0,0)',
-        font_color='white',
-        title_font_size=14,
-        showlegend=False
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-st.markdown("---")
+    update_charts(st.session_state.transaction_log, key_suffix=0)
 
 # ============================================================
-# SECTION 4 - TOP FITUR V
+# LOOP LIVE MONITORING
 # ============================================================
-st.subheader("Section 4 — Analisis Fitur")
+start_index = st.session_state.last_index
 
-v_features = ['V' + str(i) for i in range(1, 29)]
-mean_normal = df[df['Class']==0][v_features].mean()
-mean_fraud = df[df['Class']==1][v_features].mean()
-mean_diff = abs(mean_normal - mean_fraud).sort_values(ascending=False).reset_index()
-mean_diff.columns = ['Feature', 'Difference']
-mean_diff['Top5'] = mean_diff['Feature'].isin(mean_diff.head(5)['Feature'])
+for i in range(start_index, len(df_simulation)):
+    row = df_simulation.iloc[i]
+    is_fraud = row['Class'] == 1
 
-col1, col2 = st.columns(2)
+    card_number, rrn, account, merchant = generate_realistic_data(row, i)
 
-with col1:
-    fig = px.bar(
-        mean_diff,
-        x='Feature',
-        y='Difference',
-        color='Top5',
-        color_discrete_map={True: '#e74c3c', False: '#3498db'},
-        title='Fitur V Paling Membedakan Fraud vs Normal',
-    )
-    fig.update_layout(
-        plot_bgcolor='rgba(0,0,0,0)',
-        paper_bgcolor='rgba(0,0,0,0)',
-        font_color='white',
-        title_font_size=14,
-        showlegend=False,
-        xaxis=dict(tickangle=45)
-    )
-    st.plotly_chart(fig, use_container_width=True)
+    st.session_state.last_timestamp += timedelta(seconds=random.randint(1, 5))
+    timestamp = st.session_state.last_timestamp.strftime("%Y-%m-%d %H:%M:%S")
 
-with col2:
-    top_features = mean_diff.head(10)['Feature'].tolist() + ['Amount', 'Class']
-    top_features = list(dict.fromkeys(top_features))
-    corr_matrix = df[top_features].corr().round(2)
+    st.session_state.transaction_count += 1
+    if is_fraud:
+        st.session_state.fraud_count += 1
 
-    fig = px.imshow(
-        corr_matrix,
-        color_continuous_scale='RdBu_r',
-        zmin=-1,
-        zmax=1,
-        title='Heatmap Korelasi Top Fitur',
-        text_auto=True
-    )
-    fig.update_layout(
-        plot_bgcolor='rgba(0,0,0,0)',
-        paper_bgcolor='rgba(0,0,0,0)',
-        font_color='white',
-        title_font_size=14
-    )
-    st.plotly_chart(fig, use_container_width=True)
+    tc = st.session_state.transaction_count
+    fc = st.session_state.fraud_count
+    fp = round(fc / tc * 100, 4)
 
-st.markdown("---")
+    metric1.metric("Total Transaksi", f"{tc:,}")
+    metric2.metric("Total Fraud", f"{fc:,}")
+    metric3.metric("Persentase Fraud", f"{fp}%")
+    metric4.metric("Amount Terakhir", f"€{row['Amount']:.2f}")
 
-# ============================================================
-# FOOTER
-# ============================================================
-st.markdown("""
-    <div style='text-align: center; color: #a0aec0; padding: 1rem;'>
-        Credit Card Fraud Detection Dashboard — Fernanda Adytia Pratama | 
-        Dataset: Kaggle ULB Credit Card Fraud Detection
-    </div>
-""", unsafe_allow_html=True)
+    if is_fraud:
+        alert_placeholder.error(
+            f"⚠️ FRAUD DETECTED! "
+            f"RRN: {rrn} | "
+            f"Card: {card_number} | "
+            f"Amount: €{row['Amount']:.2f} | "
+            f"Merchant: {merchant} | "
+            f"Time: {timestamp}"
+        )
+    else:
+        alert_placeholder.success(
+            f"✅ Normal | "
+            f"RRN: {rrn} | "
+            f"Card: {card_number} | "
+            f"Amount: €{row['Amount']:.2f} | "
+            f"Merchant: {merchant} | "
+            f"Time: {timestamp}"
+        )
+
+    st.session_state.transaction_log.append({
+        'Timestamp': timestamp,
+        'RRN': rrn,
+        'Card Number': card_number,
+        'Account': account,
+        'Merchant': merchant,
+        'Amount (€)': round(row['Amount'], 2),
+        'Status': '🚨 FRAUD' if is_fraud else '✅ Normal'
+    })
+
+    st.session_state.last_index = i + 1
+    if st.session_state.last_index >= len(df_simulation):
+        st.session_state.last_index = 0
+
+    df_log = apply_filters(st.session_state.transaction_log)
+    if not df_log.empty:
+        table_placeholder.dataframe(df_log, use_container_width=True)
+    else:
+        table_placeholder.info("Tidak ada data pada rentang waktu yang dipilih.")
+
+    if tc % 3 == 0:
+        update_charts(st.session_state.transaction_log, key_suffix=tc)
+
+    time.sleep(1)
