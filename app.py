@@ -15,7 +15,6 @@ warnings.filterwarnings('ignore')
 # ============================================================
 st.set_page_config(
     page_title="Credit Card Fraud Detection - Live Dashboard",
-    page_icon="🔴",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
@@ -93,7 +92,7 @@ def generate_realistic_data(row, index):
 header_col1, header_col2 = st.columns([3, 2])
 
 with header_col1:
-    st.title("🔴 Credit Card Fraud Detection — Live Dashboard")
+    st.title("Credit Card Fraud Detection — Live Dashboard")
     st.markdown("Real-time transaction monitoring — by **Fernanda Adytia Pratama**")
 
 with header_col2:
