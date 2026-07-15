@@ -300,7 +300,10 @@ for i in range(start_index, len(df_simulation)):
 
     card_number, rrn, account, merchant = generate_realistic_data(row, i)
 
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    from datetime import timezone
+    import zoneinfo
+    wib = zoneinfo.ZoneInfo("Asia/Jakarta")
+    timestamp = datetime.now(wib).strftime("%Y-%m-%d %H:%M:%S")
 
     st.session_state.transaction_count += 1
     if is_fraud:
