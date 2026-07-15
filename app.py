@@ -7,6 +7,7 @@ import random
 import string
 import warnings
 from datetime import datetime, timedelta
+import streamlit.components.v1 as components
 
 warnings.filterwarnings('ignore')
 
@@ -94,6 +95,7 @@ header_col1, header_col2 = st.columns([3, 2])
 with header_col1:
     st.title("Credit Card Fraud Detection — Live Dashboard")
     st.markdown("Real-time transaction monitoring — by **Fernanda Adytia Pratama**")
+    
 
 with header_col2:
     st.markdown("<br>", unsafe_allow_html=True)
@@ -155,8 +157,11 @@ def apply_filters(log_list):
         df_log = df_log[df_log['RRN'].str.contains(search_rrn, case=False)]
     if search_card:
         df_log = df_log[df_log['Card Number'].str.contains(search_card, case=False)]
+    if status_filter == "Normal":
+        df_log = df_log[df_log['Status'] == '✅ Normal']
+    elif status_filter == "Fraud":
+        df_log = df_log[df_log['Status'] == '🚨 FRAUD']
     return df_log
-
 # ============================================================
 # METRIC CARDS
 # ============================================================
@@ -176,9 +181,13 @@ st.markdown("---")
 # ============================================================
 # SEARCH + TABEL
 # ============================================================
-search_col1, search_col2 = st.columns(2)
+search_col1, search_col2, search_col3 = st.columns(3)
 search_rrn = search_col1.text_input("🔍 Cari berdasarkan RRN")
 search_card = search_col2.text_input("🔍 Cari berdasarkan Card Number")
+status_filter = search_col3.selectbox(
+    "Filter Status",
+    options=["Semua", "Normal", "Fraud"]
+)
 
 st.subheader("Live Transaction Feed")
 table_placeholder = st.empty()
@@ -291,8 +300,7 @@ for i in range(start_index, len(df_simulation)):
 
     card_number, rrn, account, merchant = generate_realistic_data(row, i)
 
-    st.session_state.last_timestamp += timedelta(seconds=random.randint(1, 5))
-    timestamp = st.session_state.last_timestamp.strftime("%Y-%m-%d %H:%M:%S")
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     st.session_state.transaction_count += 1
     if is_fraud:
@@ -316,6 +324,24 @@ for i in range(start_index, len(df_simulation)):
             f"Merchant: {merchant} | "
             f"Time: {timestamp}"
         )
+        # Notifikasi suara fraud
+        components.html("""
+            <script>
+            var context = new AudioContext();
+            var oscillator = context.createOscillator();
+            var gainNode = context.createGain();
+            oscillator.connect(gainNode);
+            gainNode.connect(context.destination);
+            oscillator.type = 'square';
+            oscillator.frequency.setValueAtTime(880, context.currentTime);
+            oscillator.frequency.setValueAtTime(440, context.currentTime + 0.1);
+            oscillator.frequency.setValueAtTime(880, context.currentTime + 0.2);
+            gainNode.gain.setValueAtTime(0.3, context.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.001, context.currentTime + 0.5);
+            oscillator.start(context.currentTime);
+            oscillator.stop(context.currentTime + 0.5);
+            </script>
+        """, height=0)
     else:
         alert_placeholder.success(
             f"✅ Normal | "
